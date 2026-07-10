@@ -45,36 +45,27 @@ O Spotify exige autenticação de utilizador para ler playlists. Fazes na tua co
 - Funções: **timeout de 60s** (hobby). A geração de tracklist com LLM pode demorar → mantém sets até ~30 faixas por chamada.
 - Cold start: primeira chamada após inatividade pode demorar alguns segundos.
 
-## 5. Recolha do 1001tracklists (CARGA AUTOMÁTICA via worker)
-O 1001tracklists é a **fonte de conhecimento** dos DJ sets (lá estão os sets reais
-de quem toca o quê e em que ordem). A extração **não pode correr na Vercel**
-(sem browser / Cloudflare bloqueia datacenters). Por isso usa-se um **worker**
-que corres na tua máquina.
+## 5. Carga automática do grafo (Spotify API, 100% na Vercel)
+O grafo de transições ("o que funciona junto") é abastecido a partir das
+**playlists por género do Spotify**. Cada playlist vira um "set" e as faixas
+adjacentes viram arestas do grafo. Corre **inteiramente na Vercel** (usa a API
+do Spotify com Client Credentials — sem precisar do teu login e sem bloqueios).
 
-Fluxo:
-1. Na app (Vercel) → aba "Carregar Banco" → escolhes género + máx sets → **🚀 Gerar carga**.
-   Isto cria um `job` na tabela `jobs` do Supabase.
-2. O `worker.py` (a correr na tua máquina) apanha o job, extrai os sets do
-   1001tracklists (Chrome + teu IP) e grava sets+transições no Supabase.
-3. O grafo enche-se e o motor passa a montar sets com conhecimento real.
+> ⚠️ Porquê Spotify e não o 1001tracklists? O 1001tracklists bloqueia datacenters
+> (Cloudflare) e a Vercel não tem browser — impossível de correr no servidor.
+> As playlists do Spotify são a fonte servível, com BPM/tonalidade reais.
 
-Setup (1x):
-```bash
-# a) criar a tabela jobs (escolhe UMA opção):
-#   opção A — via DATABASE_URL:
-#      Supabase → Settings → Database → Connection string → copia a linha
-#      postgresql://postgres:****@db.<ref>.supabase.co:5432/postgres
-#      cola no .env como DATABASE_URL e corre:
-python setup_db.py
-#   opção B — cola config/create_jobs_table.sql na Supabase SQL Editor
-
-# b) instalar Chrome do Playwright (1x):
-playwright install chromium
-
-# c) deixar o worker a correr (num terminal próprio):
-python worker.py
+Setup (1x — criar a tabela `jobs`):
+```sql
+-- Cola config/create_jobs_table.sql na Supabase SQL Editor
+-- (a app não pode criar tabelas sozinha com a anon key).
 ```
-Depois é só clicar "Gerar carga" quando quiseres abastecer.
+Uso:
+1. Na app (Vercel) → aba "Carregar Banco" → escolhe género + máx playlists → **🚀 Gerar carga**.
+2. A app cria um `job`, busca playlists do Spotify, grava sets+transições no
+   Supabase e mostra o progresso (playlist X/Y). É resumável: se a Vercel cortar
+   aos 60s, o job fica "running" e podes avançar com o botão "avançar"/"atualizar".
+3. O grafo enche-se e o motor passa a montar sets com conhecimento real.
 
 ## 6. Atualizar a app
 ```bash

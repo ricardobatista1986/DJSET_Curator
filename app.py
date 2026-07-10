@@ -145,36 +145,118 @@ def api_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+import src.load_spotify as load_spotify
+
 @app.route("/api/collect/job", methods=["POST"])
 @login_required
 def api_collect_job():
-    """Cria um pedido de carga (job) na tabela jobs.
-    O worker (corre na máquina do utilizador com Chrome + IP residencial)
-    apanha o job, extrai do 1001tracklists e grava no Supabase."""
+    """Cria um pedido de carga e processa o 1º lote (server-side, Spotify API).
+    Processamento é resumável: cada chamada a /api/collect/step faz o próximo
+    lote (uma playlist) para caber no timeout de 60s da Vercel."""
     data = request.get_json(silent=True) or {}
     genre = data.get("genre")
-    max_sets = int(data.get("max_sets", 50))
+    max_sets = int(data.get("max_sets", 10))
     if not genre:
         return jsonify({"error": "genre obrigatório"}), 400
     try:
         row = sb.table("jobs").insert({
-            "genre_slug": genre, "max_sets": max_sets, "status": "pending"
+            "genre_slug": genre, "max_sets": max_sets,
+            "status": "running",
+            "progress": {"playlists": None, "idx": 0, "sets_done": 0},
         }).execute().data[0]
-        return jsonify({"ok": True, "job_id": row["id"]})
+        # processa o primeiro lote já na resposta
+        result = step_collect_job(row["id"])
+        return jsonify({"ok": True, "job_id": row["id"], "result": result})
     except Exception as e:
         return jsonify({"error": f"não consegui criar o job (tabela jobs existe?): {e}"}), 500
+
+
+def step_collect_job(job_id):
+    """Processa o próximo lote (uma playlist) de um job. Retorna estado.
+    Usa o token OAuth do Spotify da SESSÃO do utilizador (não Client Credentials,
+    porque ler tracks de playlists exige token de user). Cada chamada vem com o
+    session cookie, por isso get_valid_token(session) funciona em cada passo."""
+    job = sb.table("jobs").select("*").eq("id", job_id).execute().data[0]
+    if job["status"] in ("done", "error"):
+        return {"status": job["status"]}
+    token = get_valid_token(session)
+    if not token:
+        return _finish_job(job_id, error="Spotify não ligado. Clica em 'Conectar Spotify' (em cima) e volta a gerar a carga.")
+    genre_slug = job["genre_slug"]
+    max_sets = job["max_sets"]
+    progress = job.get("progress") or {"playlists": None, "idx": 0, "sets_done": 0}
+    genre = sb.table("genres").select("*").eq("slug", genre_slug).limit(1).execute().data
+    if not genre:
+        return _finish_job(job_id, error=f"género '{genre_slug}' não existe")
+    genre = genre[0]
+
+    # 1) descobrir playlists (1x) se ainda não tivermos
+    if not progress.get("playlists"):
+        pls = load_spotify.find_genre_playlists(token, genre["name"], limit=min(max_sets, 10))
+        progress["playlists"] = [p["id"] for p in pls]
+        progress["idx"] = 0
+        if not pls:
+            return _finish_job(job_id, stats={"collected": 0, "skipped": 0, "errors": 0})
+
+    # 2) processar a próxima playlist
+    idx = progress["idx"]
+    playlists = progress["playlists"]
+    if idx >= len(playlists):
+        return _finish_job(job_id, stats=progress.get("_stats", {"collected": progress["sets_done"], "skipped": 0, "errors": 0}))
+
+    pid = playlists[idx]
+    try:
+        res = load_spotify.process_playlist(sb, token, pid, genre["id"], max_tracks=60)
+        if res.get("status") == "ok":
+            progress["sets_done"] = progress.get("sets_done", 0) + 1
+        elif res.get("status") == "skip":
+            logger.info(f"playlist {pid} ignorada: {res.get('reason')}")
+    except Exception as e:
+        logger.warning(f"playlist {pid} falhou: {e}")
+    progress["idx"] = idx + 1
+    done = progress["idx"] >= len(playlists)
+    sb.table("jobs").update({
+        "progress": progress, "updated_at": "now()",
+        "status": "done" if done else "running",
+    }).eq("id", job_id).execute()
+    if done:
+        return _finish_job(job_id, stats={"collected": progress["sets_done"], "skipped": 0, "errors": 0}, already_updated=True)
+    return {"status": "running", "progress": progress, "sets_done": progress["sets_done"]}
+
+
+def _finish_job(job_id, stats=None, error=None, already_updated=False):
+    if not already_updated:
+        sb.table("jobs").update({
+            "status": "error" if error else "done",
+            "stats": stats, "error_detail": error, "updated_at": "now()",
+        }).eq("id", job_id).execute()
+    return {"status": "error" if error else "done", "stats": stats, "error_detail": error}
+
+
+@app.route("/api/collect/step", methods=["POST"])
+@login_required
+def api_collect_step():
+    """Processa o próximo lote do job mais recente (chamado pelo polling da UI)."""
+    try:
+        rows = sb.table("jobs").select("*").order("id", desc=True).limit(1).execute().data
+        if not rows:
+            return jsonify({"error": "sem jobs"}), 404
+        result = step_collect_job(rows[0]["id"])
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/collect/job/status")
 @login_required
 def api_collect_job_status():
     try:
-        # último job
         rows = sb.table("jobs").select("*").order("id", desc=True).limit(1).execute().data
         if not rows:
             return jsonify({})
         j = rows[0]
         return jsonify({"id": j["id"], "status": j["status"], "stats": j.get("stats"),
+                        "progress": j.get("progress"),
                         "error_detail": j.get("error_detail"),
                         "genre": j["genre_slug"], "created_at": str(j["created_at"])})
     except Exception as e:

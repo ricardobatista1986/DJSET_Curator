@@ -47,27 +47,30 @@
   <div class="tab-pane card p-4" id="tab-load">
     <h5>Abastecer o banco (grafo de transições)</h5>
     <div class="alert alert-info py-2" style="font-size:.88rem">
-      <b>Fonte de conhecimento:</b> o <b>1001tracklists.com</b> — lá estão os DJ sets reais
-      (quem toca o quê, e em que ordem). Cada set vira arestas no grafo de transições, e é
-      isso que o motor usa para montar os teus sets. Sem isto, a app só ordena por BPM genérico.
+      <b>Fonte de conhecimento:</b> as <b>playlists por género do Spotify</b>. Cada playlist
+      vira um "set" e as faixas adjacentes viram arestas no grafo de transições — é isso que
+      o motor usa para saber <b>o que funciona junto</b>. Corre <b>100% na Vercel</b> (usamos a
+      API do Spotify com Client Credentials, sem precisar do teu login e sem bloqueios).
     </div>
     <div class="alert alert-warning py-2" style="font-size:.85rem">
-      ⚠️ O 1001tracklists <b>não pode ser lido na Vercel</b> (sem browser / Cloudflare bloqueia
-      servidores). Por isso a extração corre <b>num worker na tua máquina</b> (Chrome + teu IP).
-      Tu clicas "Gerar carga" aqui → o worker (que deixaste a correr em background na tua máquina)
-      apanha o pedido, extrai os sets e grava no teu Supabase. <b>Instruções no DEPLOY.md.</b>
+      ⚠️ O 1001tracklists (sets ao vivo de DJs) <b>não pode ser lido no servidor</b> (Cloudflare
+      bloqueia datacenters e a Vercel não tem browser). Por isso usamos as playlists do Spotify
+      como fonte servível. As faixas vêm com BPM/tonalidade reais (via MusicBrainz/AcousticBrainz).
+      <br><b>Pré-requisito:</b> clica em <b>"Conectar Spotify"</b> (em cima) antes de gerar a carga —
+      a leitura de playlists exige o teu token OAuth. E põe a app Spotify em
+      <b>Extended Quota Mode</b> (Dashboard → Settings) para ler playlists públicas sem 403.
     </div>
 
     <div class="row g-2 align-items-end">
       <div class="col-auto"><label class="form-label">Género</label><select id="load-genre" class="form-select"></select></div>
-      <div class="col-auto"><label class="form-label">Máx. sets</label><input id="load-max" type="number" value="50" min="1" max="500" class="form-control" style="width:110px"></div>
+      <div class="col-auto"><label class="form-label">Máx. playlists</label><input id="load-max" type="number" value="8" min="1" max="20" class="form-control" style="width:120px"></div>
       <div class="col-auto"><button class="btn btn-primary" id="load-btn">🚀 Gerar carga</button></div>
       <div class="col-auto"><button class="btn btn-outline-secondary" id="load-refresh">Atualizar estado</button></div>
     </div>
     <div id="load-status" class="mt-3"></div>
     <div class="mt-3 p-2 bg-light rounded" style="font-size:.82rem">
-      <b>Worker na tua máquina:</b> <code>python worker.py</code> (deixa a correr). Ele mostra
-      progresso no terminal e grava no Supabase. Aqui vês o estado do último job.
+      O processamento é <b>automático e resumável</b>: a app vai buscar playlists do Spotify,
+      gravá-las no teu Supabase e mostrar o progresso aqui. Podes fechar e voltar — o estado fica no job.
     </div>
   </div>
 
@@ -149,14 +152,15 @@ async function loadStats(){
   $('#st-tracks').textContent = tk.length ? tk.length+'+' : '–';
 }
 
-// --- TAB 1: carga via worker (1001tracklists) ---
+// --- TAB 1: carga automática via Spotify API (server-side, resumável) ---
 $('#load-btn').onclick = async () => {
   const genre = $('#load-genre').value, max = $('#load-max').value;
-  $('#load-status').innerHTML = '<div class="text-info">⏳ A criar pedido de carga…</div>';
+  if(!confirm(`Gerar carga para "${genre}" (${max} playlists)?\nVai buscar playlists do Spotify e gravá-las no Supabase como sets+transições.`)) return;
+  $('#load-status').innerHTML = '<div class="text-info">⏳ A iniciar carga do Spotify…</div>';
   const r = await fetch('/api/collect/job', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({genre, max_sets: max})});
   const j = await r.json();
   if(!r.ok){ $('#load-status').innerHTML = `<div class="text-danger">❌ ${j.error}</div>`; return; }
-  $('#load-status').innerHTML = `<div class="text-success">✅ Pedido criado (job #${j.job_id}). O worker na tua máquina vai processar e gravar no Supabase.</div>`;
+  $('#load-status').innerHTML = `<div class="text-info">⏳ Job #${j.job_id} iniciado. A processar playlists do Spotify…</div>`;
   pollJob();
 };
 $('#load-refresh').onclick = pollJob;
@@ -165,13 +169,25 @@ async function pollJob(){
   if(st.error){ $('#load-status').innerHTML = `<div class="text-danger">❌ ${st.error}</div>`; return; }
   if(!st.id){ $('#load-status').innerHTML = '<div class="text-secondary">Sem pedidos de carga ainda.</div>'; return; }
   const estado = st.status;
-  const map = {pending:'⏳ Em espera (worker vai apanhar)', running:'🔄 A extrair sets…', done:'✅ Concluído', error:'❌ Erro'};
-  let html = `<div class="${estado==='error'?'text-danger':estado==='done'?'text-success':'text-info'}">${map[estado]||estado} <button class="btn btn-sm btn-outline-secondary" onclick="pollJob()">atualizar</button></div>`;
+  const map = {running:'🔄 A processar playlists do Spotify…', done:'✅ Concluído', error:'❌ Erro'};
+  let html = `<div class="${estado==='error'?'text-danger':estado==='done'?'text-success':'text-info'}">${map[estado]||estado}`;
+  if(estado==='running') html += ` <button class="btn btn-sm btn-outline-secondary" onclick="stepJob()">avançar</button>`;
+  html += ` <button class="btn btn-sm btn-outline-secondary" onclick="pollJob()">atualizar</button></div>`;
+  if(st.progress) html += `<div class="text-secondary small">playlist ${st.progress.idx||0}/${st.progress.playlists?st.progress.playlists.length:0} · sets gravados: ${st.progress.sets_done||0}</div>`;
   if(st.stats) html += `<div class="text-secondary small">${JSON.stringify(st.stats)}</div>`;
   if(st.error_detail) html += `<div class="text-danger small">${st.error_detail}</div>`;
   $('#load-status').innerHTML = html;
-  if(estado==='pending' || estado==='running') setTimeout(pollJob, 5000);
-  else loadStats();
+  if(estado==='running'){
+    // avança o próximo lote automaticamente (cada chamada ~1 playlist)
+    setTimeout(stepJob, 1500);
+  } else {
+    loadStats();
+  }
+}
+async function stepJob(){
+  const r = await fetch('/api/collect/step', {method:'POST', headers:{'Content-Type':'application/json'}});
+  await r.json();
+  pollJob();
 }
 async function pollCollect(){
   const st = await (await fetch('/api/collect/status')).json();

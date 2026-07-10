@@ -95,16 +95,17 @@ CREATE TABLE IF NOT EXISTS proposed_set_tracks (
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 9. Pedidos de carga (jobs) — o botão na Vercel cria; o worker local processa
+-- 9. Pedidos de carga (jobs) — criados pela app Vercel, processados server-side
 CREATE TABLE IF NOT EXISTS jobs (
-    id              SERIAL PRIMARY KEY,
-    genre_slug     TEXT NOT NULL,
-    max_sets       INTEGER NOT NULL DEFAULT 50,
-    status         TEXT DEFAULT 'pending',  -- pending | running | done | error
-    stats          JSONB,
-    error_detail   TEXT,
-    created_at     TIMESTAMPTZ DEFAULT NOW(),
-    updated_at     TIMESTAMPTZ DEFAULT NOW()
+    id            SERIAL PRIMARY KEY,
+    genre_slug   TEXT NOT NULL,
+    max_sets      INTEGER NOT NULL DEFAULT 10,
+    status        TEXT DEFAULT 'running',   -- running | done | error
+    progress      JSONB,                     -- {playlists:[ids], idx, sets_done}
+    stats         JSONB,
+    error_detail  TEXT,
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 
