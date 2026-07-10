@@ -45,19 +45,36 @@ O Spotify exige autenticação de utilizador para ler playlists. Fazes na tua co
 - Funções: **timeout de 60s** (hobby). A geração de tracklist com LLM pode demorar → mantém sets até ~30 faixas por chamada.
 - Cold start: primeira chamada após inatividade pode demorar alguns segundos.
 
-## 5. Recolha do 1001tracklists (CORRE NA TUA MÁQUINA)
-A Vercel não tem Chrome nem IP residencial → a recolha falha lá ("Server disconnected").
-Corres localmente:
+## 5. Recolha do 1001tracklists (CARGA AUTOMÁTICA via worker)
+O 1001tracklists é a **fonte de conhecimento** dos DJ sets (lá estão os sets reais
+de quem toca o quê e em que ordem). A extração **não pode correr na Vercel**
+(sem browser / Cloudflare bloqueia datacenters). Por isso usa-se um **worker**
+que corres na tua máquina.
+
+Fluxo:
+1. Na app (Vercel) → aba "Carregar Banco" → escolhes género + máx sets → **🚀 Gerar carga**.
+   Isto cria um `job` na tabela `jobs` do Supabase.
+2. O `worker.py` (a correr na tua máquina) apanha o job, extrai os sets do
+   1001tracklists (Chrome + teu IP) e grava sets+transições no Supabase.
+3. O grafo enche-se e o motor passa a montar sets com conhecimento real.
+
+Setup (1x):
 ```bash
-cd ~/djset-curator-v3/djset-curator
-. .venv/bin/activate
-pip install -r requirements.txt
+# a) criar a tabela jobs (escolhe UMA opção):
+#   opção A — via DATABASE_URL:
+#      Supabase → Settings → Database → Connection string → copia a linha
+#      postgresql://postgres:****@db.<ref>.supabase.co:5432/postgres
+#      cola no .env como DATABASE_URL e corre:
+python setup_db.py
+#   opção B — cola config/create_jobs_table.sql na Supabase SQL Editor
+
+# b) instalar Chrome do Playwright (1x):
 playwright install chromium
-python coletar.py --genre goa-psy-trance --max 50
-# ou todos os géneros:
-python coletar.py --all
+
+# c) deixar o worker a correr (num terminal próprio):
+python worker.py
 ```
-Os dados vão para o teu Supabase e aparecem na app Vercel (grafo, sets, sugestões).
+Depois é só clicar "Gerar carga" quando quiseres abastecer.
 
 ## 6. Atualizar a app
 ```bash

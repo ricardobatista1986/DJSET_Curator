@@ -95,8 +95,19 @@ CREATE TABLE IF NOT EXISTS proposed_set_tracks (
     created_at          TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ============================================================
--- Índices para performance nas queries do grafo
+-- 9. Pedidos de carga (jobs) — o botão na Vercel cria; o worker local processa
+CREATE TABLE IF NOT EXISTS jobs (
+    id              SERIAL PRIMARY KEY,
+    genre_slug     TEXT NOT NULL,
+    max_sets       INTEGER NOT NULL DEFAULT 50,
+    status         TEXT DEFAULT 'pending',  -- pending | running | done | error
+    stats          JSONB,
+    error_detail   TEXT,
+    created_at     TIMESTAMPTZ DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
 -- ============================================================
 CREATE INDEX IF NOT EXISTS idx_transitions_from     ON transitions(track_from_id, genre_id);
 CREATE INDEX IF NOT EXISTS idx_transitions_to       ON transitions(track_to_id, genre_id);

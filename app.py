@@ -145,43 +145,41 @@ def api_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/api/collect", methods=["POST"])
+@app.route("/api/collect/job", methods=["POST"])
 @login_required
-def api_collect():
+def api_collect_job():
+    """Cria um pedido de carga (job) na tabela jobs.
+    O worker (corre na máquina do utilizador com Chrome + IP residencial)
+    apanha o job, extrai do 1001tracklists e grava no Supabase."""
     data = request.get_json(silent=True) or {}
     genre = data.get("genre")
     max_sets = int(data.get("max_sets", 50))
     if not genre:
         return jsonify({"error": "genre obrigatório"}), 400
-    with _collect_lock:
-        if _collect_state["running"]:
-            return jsonify({"error": "já há uma coleta em curso", "state": _collect_state}), 409
-        _collect_state.update({"running": True, "genre": genre, "stats": None,
-                               "started_at": datetime.now().isoformat(),
-                               "done_at": None, "error": None})
-    # roda em background (o Collector é async)
-    def _run():
-        from src.collector.collector import Collector
-        c = Collector(sb)
-        try:
-            res = asyncio_run(c.collect_genre(genre, max_sets))
-            with _collect_lock:
-                _collect_state.update({"running": False, "stats": res,
-                                       "done_at": datetime.now().isoformat()})
-        except Exception as e:
-            logger.exception("coleta falhou")
-            with _collect_lock:
-                _collect_state.update({"running": False, "error": str(e),
-                                       "done_at": datetime.now().isoformat()})
-    t = threading.Thread(target=_run, daemon=True)
-    t.start()
-    return jsonify({"ok": True, "genre": genre, "max_sets": max_sets})
+    try:
+        row = sb.table("jobs").insert({
+            "genre_slug": genre, "max_sets": max_sets, "status": "pending"
+        }).execute().data[0]
+        return jsonify({"ok": True, "job_id": row["id"]})
+    except Exception as e:
+        return jsonify({"error": f"não consegui criar o job (tabela jobs existe?): {e}"}), 500
 
-@app.route("/api/collect/status")
+
+@app.route("/api/collect/job/status")
 @login_required
-def api_collect_status():
-    with _collect_lock:
-        return jsonify(dict(_collect_state))
+def api_collect_job_status():
+    try:
+        # último job
+        rows = sb.table("jobs").select("*").order("id", desc=True).limit(1).execute().data
+        if not rows:
+            return jsonify({})
+        j = rows[0]
+        return jsonify({"id": j["id"], "status": j["status"], "stats": j.get("stats"),
+                        "error_detail": j.get("error_detail"),
+                        "genre": j["genre_slug"], "created_at": str(j["created_at"])})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/build", methods=["POST"])
 @login_required
@@ -200,7 +198,15 @@ def api_build():
             if token:
                 pl = tracks_from_playlist_with_token(token, spotify_url)
             else:
-                pl = enricher.tracks_from_playlist(spotify_url)
+                # tenta Client Credentials (só playlists públicas muito raras)
+                try:
+                    pl = enricher.tracks_from_playlist(spotify_url)
+                except Exception as e2:
+                    raise Exception(
+                        "não consegui ler a playlist. Se forcurada do Spotify ou de "
+                        "outro utilizador, a app tem de estar em 'Extended Quota Mode' "
+                        "(Dashboard Spotify > Settings > desmarcar Development Mode). "
+                        "Ou usa uma playlist SUA. Erro original: " + str(e2))
             tracks = pl + tracks  # playlist primeiro, depois manuais
         except Exception as e:
             return jsonify({"error": f"Playlist Spotify: {e}"}), 400
