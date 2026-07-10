@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DJ Set Curator</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  body { background:#0d0d12; color:#e8e8ef; }
+  .nav-tabs .nav-link { color:#9aa; }
+  .nav-tabs .nav-link.active { color:#fff; background:#1a1a24; border-color:#2a2a38; }
+  .card { background:#16161f; border:1px solid #262633; }
+  .btn-primary { background:#7c3aed; border-color:#7c3aed; }
+  .btn-primary:hover { background:#6d28d9; }
+  textarea { background:#0f0f17; color:#e8e8ef; border:1px solid #2a2a38; }
+  pre { background:#0f0f17; color:#c9f7d4; padding:1rem; border-radius:8px; white-space:pre-wrap; }
+  .stat { font-size:1.6rem; font-weight:700; }
+  .pill { background:#262633; border-radius:20px; padding:2px 10px; font-size:.8rem; }
+  .sugg { border-left:3px solid #f59e0b; padding-left:10px; margin:4px 0; }
+  .track-row { display:flex; align-items:center; gap:.5rem; padding:.3rem .5rem; border-bottom:1px solid #23232e; }
+  .track-row .pos { width:28px; color:#888; }
+  .track-row .name { flex:1; }
+  #net { height:420px; background:#0f0f17; border-radius:8px; }
+</style>
+</head>
+<body>
+<div class="container py-4">
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <h2 class="mb-0">🎧 DJ Set Curator</h2>
+    <div><span id="who" class="text-secondary"></span> <a href="/logout" class="btn btn-sm btn-outline-secondary">Sair</a></div>
+  </div>
+  <p class="text-secondary">Aprende transições de DJs reais (1001tracklists) e monta os teus sets com grafo + IA. <span class="pill" id="llm-pill">LLM: ?</span></p>
+
+  <div class="row mb-3">
+    <div class="col-4"><div class="card p-3"><div class="stat" id="st-sets">–</div><div class="text-secondary">Sets recolhidos</div></div></div>
+    <div class="col-4"><div class="card p-3"><div class="stat" id="st-tracks">–</div><div class="text-secondary">Tracks no catálogo</div></div></div>
+    <div class="col-4"><div class="card p-3"><div class="stat" id="st-trans">–</div><div class="text-secondary">Transições no grafo</div></div></div>
+  </div>
+
+  <ul class="nav nav-tabs mb-3" id="tabs">
+    <li class="nav-item"><button class="nav-link active" data-tab="load">1. Carregar Banco</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab="build">2. Montar Set</button></li>
+    <li class="nav-item"><button class="nav-link" data-tab="explore">3. Explorar / Sets</button></li>
+  </ul>
+
+  <div class="tab-pane card p-4" id="tab-load">
+    <h5>Recolectar sets do 1001tracklists</h5>
+    <p class="text-secondary">Preenche o grafo de transições com sets reais de um género. Quanto mais dados, melhores as sugestões.</p>
+    <div class="row g-2 align-items-end">
+      <div class="col-auto"><label class="form-label">Género</label><select id="load-genre" class="form-select"></select></div>
+      <div class="col-auto"><label class="form-label">Máx. sets</label><input id="load-max" type="number" value="50" min="1" max="500" class="form-control" style="width:110px"></div>
+      <div class="col-auto"><button class="btn btn-primary" id="load-btn">Iniciar recolha</button></div>
+    </div>
+    <div id="load-status" class="mt-3"></div>
+  </div>
+
+  <div class="tab-pane card p-4 d-none" id="tab-build">
+    <h5>Montar tracklist a partir da tua lista</h5>
+    <p class="text-secondary">Cola uma track por linha no formato <code>Artista - Título</code>. O motor enriquece (BPM/Key), consulta o grafo e pede ao LLM a ordem ideal.</p>
+    <div class="row g-2">
+      <div class="col-md-8">
+        <label class="form-label">As tuas tracks</label>
+        <textarea id="build-tracks" class="form-control" rows="10" placeholder="Vini Vici - The Tribe&#10;Astrix - Basic&#10;Neelix - Supersonic&#10;Infected Mushroom - Psycho"></textarea>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Género</label><select id="build-genre" class="form-select mb-2"></select>
+        <label class="form-label">Nome do set</label><input id="build-name" class="form-control mb-2" value="Meu Set">
+        <button class="btn btn-primary w-100" id="build-btn">Gerar tracklist</button>
+      </div>
+    </div>
+    <div id="build-result" class="mt-3"></div>
+  </div>
+
+  <div class="tab-pane card p-4 d-none" id="tab-explore">
+    <h5>Catálogo, grafo e sets guardados</h5>
+    <ul class="nav nav-pills mb-3">
+      <li><button class="nav-link active" data-sub="sets">Sets propostos</button></li>
+      <li><button class="nav-link" data-sub="top">Tracks mais ligadas</button></li>
+      <li><button class="nav-link" data-sub="net">Grafo de transições</button></li>
+    </ul>
+    <div id="sub-sets"><div id="sets-list"></div><div id="set-detail" class="mt-3"></div></div>
+    <div id="sub-top" class="d-none"><div id="top-list"></div></div>
+    <div id="sub-net" class="d-none"><div id="net"></div><div class="text-secondary mt-2">Top 40 nós por grau (cliques arrastam; scroll faz zoom).</div></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let GENRES = [], USER = "";
+
+document.querySelectorAll('#tabs .nav-link').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tabs .nav-link').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  ['load','build','explore'].forEach(t => $('#tab-'+t).classList.toggle('d-none', b.dataset.tab!==t));
+});
+
+async function loadMeta(){
+  const me = await (await fetch('/api/who')).json().catch(()=>({}));
+  USER = me.user || ''; $('#who').textContent = USER;
+  if(me.llm) $('#llm-pill').textContent = 'LLM: ' + me.llm;
+  GENRES = await (await fetch('/api/genres')).json();
+  const opts = GENRES.map(g=>`<option value="${g.slug}">${g.name}</option>`).join('');
+  $('#load-genre').innerHTML = opts; $('#build-genre').innerHTML = opts;
+  const s = await (await fetch('/api/stats')).json();
+  $('#st-sets').textContent = s.sets ?? '–';
+  $('#st-trans').textContent = s.transitions ?? '–';
+  const tk = await (await fetch('/api/graph')).json();
+  $('#st-tracks').textContent = tk.length ? tk.length+'+' : '–';
+}
+
+// --- TAB 1 ---
+$('#load-btn').onclick = async () => {
+  const genre = $('#load-genre').value, max = $('#load-max').value;
+  $('#load-status').innerHTML = '<div class="text-info">A iniciar…</div>';
+  const r = await fetch('/api/collect', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({genre, max_sets: max})});
+  if(!r.ok){ $('#load-status').innerHTML = '<div class="text-danger">'+(await r.json()).error+'</div>'; return; }
+  pollCollect();
+};
+async function pollCollect(){
+  const st = await (await fetch('/api/collect/status')).json();
+  if(st.running){ $('#load-status').innerHTML = `<div class="text-info">⏳ Recolha em curso (${st.genre})… <button class="btn btn-sm btn-outline-secondary" onclick="pollCollect()">atualizar</button></div>`; setTimeout(pollCollect, 4000); }
+  else if(st.error){ $('#load-status').innerHTML = `<div class="text-danger">Erro: ${st.error}</div>`; loadMeta(); }
+  else { $('#load-status').innerHTML = `<div class="text-success">✅ Concluído: ${JSON.stringify(st.stats)}</div>`; loadMeta(); }
+}
+
+// --- TAB 2 ---
+$('#build-btn').onclick = async () => {
+  const tracks = $('#build-tracks').value, genre = $('#build-genre').value, name = $('#build-name').value;
+  if(!tracks.trim()){ $('#build-result').innerHTML='<div class="text-warning">Cola as tuas tracks.</div>'; return; }
+  $('#build-result').innerHTML = '<div class="text-info">⏳ A gerar tracklist (pode demorar 30–60s)…</div>';
+  const r = await fetch('/api/build', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({tracks, genre, name})});
+  const j = await r.json();
+  if(!r.ok){ $('#build-result').innerHTML = '<div class="text-danger">Erro: '+(j.error||'desconhecido')+'</div>'; return; }
+  let html = `<div class="mt-2"><b>Tracklist gerada</b> <span class="pill">set #${j.proposed_set_id}</span> <button class="btn btn-sm btn-outline-secondary" onclick="loadSets()">ver em Sets</button></div>`;
+  html += `<pre>${j.output_text}</pre>`;
+  if(j.suggestions && j.suggestions.length){
+    html += '<div class="mt-2"><b>Sugestões externas do grafo</b></div>';
+    j.suggestions.forEach(s => html += `<div class="sugg">${s.artist} - ${s.title} <span class="pill">${s.count}×</span> ${s.bpm?('BPM '+s.bpm):''} ${s.camelot_key?('Key '+s.camelot_key):''} <small class="text-secondary">após ${s.after_track}</small></div>`);
+  }
+  $('#build-result').innerHTML = html;
+};
+
+// --- TAB 3 ---
+document.querySelectorAll('#tab-explore .nav-pills .nav-link').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#tab-explore .nav-pills .nav-link').forEach(x=>x.classList.remove('active'));
+  b.classList.add('active');
+  $('#sub-sets').classList.toggle('d-none', b.dataset.sub!=='sets');
+  $('#sub-top').classList.toggle('d-none', b.dataset.sub!=='top');
+  $('#sub-net').classList.toggle('d-none', b.dataset.sub!=='net');
+  if(b.dataset.sub==='sets') loadSets();
+  if(b.dataset.sub==='top') loadTop();
+  if(b.dataset.sub==='net') loadNet();
+});
+
+async function trackName(id){
+  const t = await (await fetch('/api/graph')).json(); // nao ideal; usamos cache
+  return id;
+}
+let TRACK_CACHE = {};
+async function loadSets(){
+  const rows = await (await fetch('/api/proposed')).json();
+  $('#sets-list').innerHTML = rows.length ? rows.map(r=>`<div class="sugg border-0" style="cursor:pointer" onclick="openSet(${r.id})">#${r.id} — ${(r.user_lists&&r.user_lists.name)||'set'} <small class="text-secondary">${r.created_at}</small></div>`).join('') : '<div class="text-secondary">Nenhum set gerado ainda.</div>';
+}
+async function openSet(pid){
+  const d = await (await fetch('/api/proposed/'+pid)).json();
+  if(d.error){ $('#set-detail').innerHTML = '<div class="text-danger">'+d.error+'</div>'; return; }
+  // resolve nomes
+  let html = `<div class="d-flex justify-content-between"><h6>Set #${pid}</h6><span class="pill">${d.tracks.length} faixas</span></div>`;
+  html += '<div id="tracks-edit">';
+  d.tracks.forEach((t,i)=>{
+    const td = TRACK_CACHE[t.track_id] || {};
+    html += `<div class="track-row" data-id="${t.track_id}"><span class="pos">${i+1}</span>
+      <span class="name">${td.artist||'?'} - ${td.title||'faixa #'+t.track_id}</span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="moveTrack(${pid},${t.track_id},-1)">↑</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="moveTrack(${pid},${t.track_id},1)">↓</button>
+      <button class="btn btn-sm btn-outline-danger" onclick="delTrack(${pid},${t.track_id})">✕</button></div>`;
+  });
+  html += '</div><button class="btn btn-sm btn-primary mt-2" onclick="saveOrder('+pid+')">Guardar ordem</button>';
+  html += `<div class="mt-3"><b>Tracklist (texto)</b></div><pre id="out-${pid}">${d.set.raw_output||''}</pre>`;
+  html += `<button class="btn btn-sm btn-outline-secondary" onclick="saveOutput(${pid})">Guardar texto</button>`;
+  $('#set-detail').innerHTML = html;
+}
+async function moveTrack(pid, id, dir){
+  const rows = [...document.querySelectorAll('#tracks-edit .track-row')];
+  const idx = rows.findIndex(r=>r.dataset.id==id);
+  const ni = idx+dir;
+  if(ni<0||ni>=rows.length) return;
+  const wrap = $('#tracks-edit');
+  if(dir<0) wrap.insertBefore(rows[idx], rows[ni]); else wrap.insertBefore(rows[idx], rows[ni].nextSibling);
+  renumber();
+}
+function delTrack(pid, id){
+  document.querySelector(`#tracks-edit .track-row[data-id="${id}"]`).remove();
+  renumber();
+}
+function renumber(){
+  [...document.querySelectorAll('#tracks-edit .track-row')].forEach((r,i)=> r.querySelector('.pos').textContent=i+1);
+}
+async function saveOrder(pid){
+  const order = [...document.querySelectorAll('#tracks-edit .track-row')].map(r=> parseInt(r.dataset.id));
+  await fetch('/api/set/'+pid+'/reorder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({order})});
+  alert('Ordem guardada.'); loadSets();
+}
+async function saveOutput(pid){
+  const out = $('#out-'+pid).textContent;
+  await fetch('/api/set/'+pid+'/output',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({output:out})});
+  alert('Texto guardado.');
+}
+
+async function loadTop(){
+  const rows = await (await fetch('/api/graph')).json();
+  rows.forEach(t=> TRACK_CACHE[t.id]=t);
+  $('#top-list').innerHTML = rows.length ? rows.map(t=>`<div class="sugg border-0">${t.artist} - ${t.title} <span class="pill">grau ${t.degree}</span> ${t.bpm?('BPM '+t.bpm):''} ${t.camelot_key?('Key '+t.camelot_key):''}</div>`).join('') : '<div class="text-secondary">Sem dados ainda. Recolhe sets na aba 1.</div>';
+}
+let netObj=null;
+async function loadNet(){
+  const d = await (await fetch('/api/graph/edges')).json();
+  if(d.error){ $('#net').innerHTML='<div class="text-danger">'+d.error+'</div>'; return; }
+  const nodes = Object.entries(d.nodes).map(([id,l])=>({id:+id,label:l,title:l}));
+  const edges = d.edges.map(e=>({from:e.from,to:e.to}));
+  const container = $('#net');
+  netObj = new vis.Network(container, {nodes,edges}, {nodes:{shape:'dot',size:10,font:{color:'#fff'}},edges:{arrows:'to',color:'#444'},physics:true});
+  // guarda cache de nomes
+  Object.entries(d.nodes).forEach(([id,l])=> TRACK_CACHE[id]={artist:l.split(' - ')[0],title:l.split(' - ')[1]||l});
+}
+
+// boot
+loadMeta();
+// quando entra em /login, o flask redireciona; este script corre só autenticado
+</script>
+</body>
+</html>

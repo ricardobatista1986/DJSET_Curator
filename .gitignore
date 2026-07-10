@@ -1,0 +1,27 @@
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# caches / runtime
+.cache/
+*.log
+playwright-profile/
+__pycache__/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+
+.cache
+.cache/
