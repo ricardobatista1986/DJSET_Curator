@@ -56,6 +56,30 @@ class Enricher:
         self._upsert_track_db(result)
         return result
 
+    def tracks_from_playlist(self, playlist_url: str) -> list:
+        """Extrai faixas de uma playlist Spotify pública.
+        Retorna lista de 'Artista - Título'. Usa Client Credentials (sem login de user)."""
+        import re as _re
+        m = _re.search(r"playlist/([A-Za-z0-9]+)", playlist_url)
+        if not m:
+            raise ValueError("URL de playlist Spotify inválida.")
+        pid = m.group(1)
+        out = []
+        try:
+            results = self.sp.playlist_items(pid, additional_types=("track",))
+            while results:
+                for item in results["items"]:
+                    tr = item.get("track")
+                    if not tr:
+                        continue
+                    art = ", ".join(a["name"] for a in tr.get("artists", []))
+                    out.append(f"{art} - {tr['name']}")
+                results = self.sp.next(results) if results.get("next") else None
+            return out
+        except Exception as e:
+            logger.error(f"Erro ao ler playlist Spotify: {e}")
+            raise
+
     def enrich_all_unenriched(self, batch_size: int = 50):
         """Enriquece em lote as tracks sem dados. Rode apos coleta grande."""
         tracks = (

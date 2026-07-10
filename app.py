@@ -39,6 +39,8 @@ from src.graph.graph import Graph
 from src.enricher.enricher import Enricher
 from src.curator.curator import Curator
 from src.llm.llm import LLMProvider
+from src.spotify_oauth import (authorize_url, exchange_code, get_valid_token,
+                               tracks_from_playlist_with_token)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("djset-web")
@@ -188,9 +190,22 @@ def api_build():
     raw = data.get("tracks", "")
     genre = data.get("genre")
     name = data.get("name", "Meu Set")
-    if not raw or not genre:
-        return jsonify({"error": "tracks e genre obrigatórios"}), 400
+    spotify_url = (data.get("spotify_url") or "").strip()
+    if not genre:
+        return jsonify({"error": "genre obrigatório"}), 400
     tracks = [line.strip() for line in raw.splitlines() if line.strip()]
+    if spotify_url:
+        try:
+            token = get_valid_token(session)
+            if token:
+                pl = tracks_from_playlist_with_token(token, spotify_url)
+            else:
+                pl = enricher.tracks_from_playlist(spotify_url)
+            tracks = pl + tracks  # playlist primeiro, depois manuais
+        except Exception as e:
+            return jsonify({"error": f"Playlist Spotify: {e}"}), 400
+    if not tracks:
+        return jsonify({"error": "coloca tracks ou um link de playlist Spotify"}), 400
     try:
         result = curator.build_set(tracks, genre, list_name=name, save_to_db=True)
         return jsonify({
@@ -311,8 +326,42 @@ def api_set_output(pid):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# =====================================================================
-# helper p/ correr corrotina numa thread
+
+# ---- Spotify OAuth (leitura de playlists do user) ----
+@app.route("/api/spotify/login")
+@login_required
+def api_spotify_login():
+    import secrets
+    state = secrets.token_urlsafe(16)
+    session["spotify_state"] = state
+    return jsonify({"url": authorize_url(state)})
+
+
+@app.route("/api/spotify/callback")
+def api_spotify_callback():
+    code = request.args.get("code")
+    state = request.args.get("state")
+    if not code:
+        return redirect("/login")
+    if state != session.get("spotify_state"):
+        return redirect("/?spotify=erro")
+    try:
+        tok = exchange_code(code)
+        tok["expires_at"] = int(time.time()) + tok.get("expires_in", 3600)
+        session["spotify_token"] = tok
+    except Exception as e:
+        logger.error(f"spotify callback erro: {e}")
+    return redirect("/?spotify=ok")
+
+
+@app.route("/api/spotify/status")
+@login_required
+def api_spotify_status():
+    t = get_valid_token(session)
+    return jsonify({"connected": bool(t)})
+
+
+
 # =====================================================================
 def asyncio_run(coro):
     import asyncio
