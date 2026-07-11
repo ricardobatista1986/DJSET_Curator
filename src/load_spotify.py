@@ -93,23 +93,27 @@ def _pitch_to_camelot(key: str, mode: str) -> Optional[str]:
 
 # --------------------------------------------------------------------------
 # Playlist discovery + processing
-# --------------------------------------------------------------------------
-def find_genre_playlists(token: str, genre_name: str, limit: int = 8) -> list:
-    """Procura playlists do Spotify para um género (por nome)."""
-    q = urllib.parse.quote(f"{genre_name} playlist")
-    url = f"{SPOTIFY_API}/search?q={q}&type=playlist&limit={limit}"
+def find_genre_playlists(token: str, genre_name: str, limit: int = 10) -> List[dict]:
+    """Em Development Mode o Spotify bloqueia playlists de terceiros (403).
+    Por isso usamos as PLAYLISTS DA PRÓPRIA CONTA do utilizador (/me/playlists),
+    filtradas pelo nome do género quando possível. Isto funciona 100% em dev mode
+    com o token OAuth do utilizador. Se quiseres playlists públicas arbitrárias,
+    precisas de Extended Quota Mode no Dashboard."""
+    url = f"{SPOTIFY_API}/me/playlists?limit=50"
     data = _get(url, token)
-    items = data.get("playlists", {}).get("items", [])
+    items = data.get("items", [])
     out = []
-    for p in items:
-        if not p:
-            continue
-        out.append({"id": p["id"], "name": p["name"],
-                    "tracks_total": (p.get("tracks") or {}).get("total", 0),
-                    "followers": (p.get("followers") or {}).get("total", 0)})
-    # ordena por popularidade (seguidores)
-    out.sort(key=lambda x: x["followers"], reverse=True)
-    return out
+    gn = genre_name.lower()
+    for pl in items:
+        name = pl.get("name", "")
+        total = (pl.get("tracks") or {}).get("total", 0)
+        # prioriza playlists cujo nome mencione o género
+        match = gn in name.lower()
+        out.append({"id": pl["id"], "name": name, "tracks_total": total,
+                    "genre_match": match})
+    # ordena: primeiros os que mencionam o género, depois os restantes
+    out.sort(key=lambda x: (not x["genre_match"], x["tracks_total"]))
+    return out[:limit]
 
 
 def process_playlist(sb, token: str, playlist_id: str, genre_id: int,

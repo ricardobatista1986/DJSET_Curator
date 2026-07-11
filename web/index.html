@@ -54,11 +54,11 @@
     </div>
     <div class="alert alert-warning py-2" style="font-size:.85rem">
       ⚠️ O 1001tracklists (sets ao vivo de DJs) <b>não pode ser lido no servidor</b> (Cloudflare
-      bloqueia datacenters e a Vercel não tem browser). Por isso usamos as playlists do Spotify
-      como fonte servível. As faixas vêm com BPM/tonalidade reais (via MusicBrainz/AcousticBrainz).
-      <br><b>Pré-requisito:</b> clica em <b>"Conectar Spotify"</b> (em cima) antes de gerar a carga —
-      a leitura de playlists exige o teu token OAuth. E põe a app Spotify em
-      <b>Extended Quota Mode</b> (Dashboard → Settings) para ler playlists públicas sem 403.
+      bloqueia datacenters e a Vercel não tem browser). Por isso usamos as <b>tuas playlists do Spotify</b>
+      como fonte servível (cada uma vira um "set", as faixas adjacentes viram arestas do grafo).
+      <br><b>Pré-requisito:</b> clica em <b>"Conectar Spotify"</b> (em cima) antes de gerar a carga.
+      Funciona em Development Mode (lê as <b>tuas próprias playlists</b>). Para usar playlists públicas
+      arbitrárias, precisas de tirar a app do Development Mode (Extended Quota Mode) no Dashboard.
     </div>
 
     <div class="row g-2 align-items-end">
