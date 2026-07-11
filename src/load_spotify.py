@@ -6,9 +6,9 @@ vira um set de DJ e as faixas adjacentes viram arestas do grafo de transições
 (= "o que funciona junto"). Cada faixa é enriquecida com BPM/tonalidade via
 MusicBrainz→AcousticBrainz (grátis, sem chave).
 
-Usa Client Credentials (não precisa do login do user) → corre na Vercel.
-Processa em LOTES RESUMÁVEIS (uma playlist por passo) para caber no timeout
-de 60s das funções serverless.
+Usa o token OAuth da sessão do utilizador (lê as playlists da própria conta,
+que funciona em Development Mode). Processa em LOTES RESUMÁVEIS (uma playlist
+por passo) para caber no timeout de 60s das funções serverless.
 """
 import os
 import time
@@ -16,7 +16,7 @@ import logging
 import urllib.parse
 import urllib.request
 import json
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
