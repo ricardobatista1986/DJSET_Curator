@@ -59,6 +59,9 @@ Setup (1x — criar a tabela `jobs`):
 ```sql
 -- Cola config/create_jobs_table.sql na Supabase SQL Editor
 -- (a app não pode criar tabelas sozinha com a anon key).
+-- A tabela nova fica com RLS ligado por padrão → a anon key é bloqueada.
+-- Desativa RLS (app pessoal, usa anon key):
+ALTER TABLE jobs DISABLE ROW LEVEL SECURITY;
 ```
 Uso:
 1. Na app (Vercel) → aba "Carregar Banco" → escolhe género + máx playlists → **🚀 Gerar carga**.

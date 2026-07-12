@@ -75,9 +75,21 @@ def tracks_from_playlist_with_token(access_token: str, playlist_url: str) -> lis
     from urllib.parse import quote
     import requests
     import re
-    m = re.search(r"playlist/([A-Za-z0-9]+)", playlist_url)
+    _u = (playlist_url or "").strip()
+    if not _u:
+        raise ValueError("coloca o link da playlist do Spotify.")
+    # ajuda a detetar colagens erradas (tokens, API keys, etc.)
+    _low = _u.lower()
+    if "open.spotify.com" not in _low and "spotify.com" not in _low:
+        raise ValueError(
+            "isso não é uma URL do Spotify. Cola o LINK da playlist "
+            "(ex.: https://open.spotify.com/playlist/XXXX?si=...), "
+            "não um token/GitHub PAT nem uma API key.")
+    m = re.search(r"playlist/([A-Za-z0-9]+)", _u)
     if not m:
-        raise ValueError("URL de playlist Spotify inválida.")
+        raise ValueError(
+            "URL de playlist Spotify inválida. Confirma que termina em "
+            "/playlist/ID (ex.: https://open.spotify.com/playlist/XXXX?si=...).")
     pid = m.group(1)
     out = []
     url = f"https://api.spotify.com/v1/playlists/{pid}/tracks?limit=100"
